@@ -4,3 +4,4 @@ dist
 .idea
 .venv
 tests/outputs**
+test_private.py
