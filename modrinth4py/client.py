@@ -207,7 +207,7 @@ class ModrinthClient:
         if icon_path:
             with icon_path.open("rb") as icon_file:
                 return self._request("POST", "/project", data={"data": json.dumps(payload)}, files={"icon": icon_file})
-        return self._request("POST", "/project", data={"data": json.dumps(payload)})
+        return self._request("POST", "/project", data={"data": json.dumps(payload)}, files={})
 
     def modify_project(self, id_or_slug: str, update: ProjectUpdate) -> None:
         """Partially update a project."""
