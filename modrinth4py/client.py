@@ -7,7 +7,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import ExitStack
 from pathlib import Path
-from typing import Optional, List, Any, IO, Iterator, Callable, Dict
+from typing import Optional, List, Any, IO, Iterator, Callable, Dict, Iterable
 
 import requests
 from requests.adapters import HTTPAdapter
@@ -38,6 +38,26 @@ def _cut_game_versions_until(cutoff_version: str, versions: List[DictKV]) -> Lis
         result.append(version)
         if version.get("version") == cutoff_version:
             break
+    return result
+
+
+def _normalize_version_strings(items: Optional[Iterable[Any]]) -> List[str]:
+    if not items:
+        return []
+    result: List[str] = []
+    for item in items:
+        if isinstance(item, str):
+            result.append(item)
+        elif isinstance(item, dict):
+            value = item.get("version")
+            if value is None:
+                raise ValueError(
+                    "Cannot normalize tag dict to string: missing 'version' key "
+                    f"in {item!r}"
+                )
+            result.append(str(value))
+        else:
+            result.append(str(item))
     return result
 
 
@@ -240,14 +260,24 @@ class ModrinthClient:
         """Upload a new version with one or more files."""
         with ExitStack() as stack:
             files = {f"file{i}": stack.enter_context(p.open("rb")) for i, p in enumerate(file_paths)}
-            payload: DictKV = {**version.__dict__, "file_parts": list(files.keys())}
+            payload: DictKV = {
+                **version.__dict__,
+                "game_versions": _normalize_version_strings(version.game_versions),
+                "loaders": _normalize_version_strings(version.loaders),
+                "file_parts": list(files.keys()),
+            }
             if primary_file:
                 payload["primary_file"] = primary_file
             return self._request("POST", "/version", data={"data": json.dumps(payload)}, files=files)
 
     def modify_version(self, version_id: str, update: VersionUpdate) -> None:
         """Partially update a version."""
-        self._request("PATCH", f"/version/{version_id}", json=self._to_dict(update))
+        body = self._to_dict(update)
+        if "game_versions" in body:
+            body["game_versions"] = _normalize_version_strings(body["game_versions"])
+        if "loaders" in body:
+            body["loaders"] = _normalize_version_strings(body["loaders"])
+        self._request("PATCH", f"/version/{version_id}", json=body)
 
     def delete_version(self, version_id: str) -> None:
         """Delete a version permanently."""
@@ -281,6 +311,19 @@ class ModrinthClient:
     def get_game_versions_until(self, cutoff_version: str) -> ListDictKV:
         """Return game versions from newest down to and including ``cutoff_version``."""
         return _cut_game_versions_until(cutoff_version, self.get_game_versions())
+
+    def get_game_version_strings_until(self, cutoff_version: str) -> List[str]:
+        """Return game version strings from newest down to and including ``cutoff_version``."""
+        return _normalize_version_strings(
+            v.get("version") for v in _cut_game_versions_until(cutoff_version, self.get_game_versions())
+        )
+
+    def get_loader_strings(self) -> List[str]:
+        """Return loader strings (e.g. ``["fabric", "forge"]``) from the Modrinth tag API."""
+        return _normalize_version_strings(
+            loader.get("name") or loader.get("version") or loader.get("loader")
+            for loader in self.get_loaders()
+        )
 
     def get_loaders(self) -> ListDictKV:
         """Return all known mod loaders from the Modrinth tag API."""
